@@ -71,6 +71,17 @@ void ui_init(ui_lock_action_cb_t lock_cb, ui_vent_action_cb_t vent_cb)
 
     if (!lvgl_port_lock(0)) return;
 
+    /* Activate LVGL's built-in dark theme so all widget states
+     * (pressed, focused, disabled, scrollbar) inherit dark styling.
+     * Custom per-widget colours applied below take precedence. */
+    lv_theme_t *theme = lv_theme_default_init(
+        lv_display_get_default(),
+        lv_palette_main(LV_PALETTE_BLUE),
+        lv_palette_main(LV_PALETTE_DEEP_PURPLE),
+        true,               /* dark mode */
+        LV_FONT_DEFAULT);
+    lv_display_set_theme(lv_display_get_default(), theme);
+
     lv_obj_t *scr = lv_scr_act();
     lv_obj_set_style_bg_color(scr, CLR_BG, 0);
     lv_obj_set_style_bg_opa(scr, LV_OPA_COVER, 0);
