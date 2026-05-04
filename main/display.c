@@ -98,7 +98,7 @@ lv_disp_t *display_init(void)
         esp_lcd_new_panel_st7789(lcd_io, &panel_cfg, &lcd_panel);
         esp_lcd_panel_reset(lcd_panel);
         esp_lcd_panel_init(lcd_panel);
-        esp_lcd_panel_invert_color(lcd_panel, true);  /* ST7789 requires inversion */
+        esp_lcd_panel_invert_color(lcd_panel, false);
     }
 #else /* ILI9341 */
     {
