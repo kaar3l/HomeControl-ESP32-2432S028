@@ -41,7 +41,7 @@ static void lock_btn_cb(lv_event_t *e)
     if (!s_lock_cb) return;
     bool do_lock = (s_lock_state == LOCK_STATE_UNLOCKED);
     s_lock_cb(do_lock);
-    ui_show_feedback(do_lock ? "Locking..." : "Unlocking...");
+    /* feedback is set by on_lock_action before queuing the command */
 }
 
 static void vent_btn_cb(lv_event_t *e)

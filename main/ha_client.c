@@ -36,8 +36,18 @@ static esp_err_t http_event_handler(esp_http_client_event_t *ev)
 
 void ha_client_init(const char *base_url, const char *token, lock_state_cb_t cb)
 {
-    strlcpy(s_base_url, base_url, sizeof(s_base_url));
-    strlcpy(s_token,    token,    sizeof(s_token));
+    /* Prepend http:// if the user omitted the scheme */
+    if (strncmp(base_url, "http://", 7) != 0 &&
+        strncmp(base_url, "https://", 8) != 0) {
+        snprintf(s_base_url, sizeof(s_base_url), "http://%s", base_url);
+    } else {
+        strlcpy(s_base_url, base_url, sizeof(s_base_url));
+    }
+    /* Strip trailing slash so path concatenation is always clean */
+    size_t len = strlen(s_base_url);
+    if (len > 0 && s_base_url[len - 1] == '/') s_base_url[len - 1] = '\0';
+
+    strlcpy(s_token, token, sizeof(s_token));
     s_cb = cb;
 }
 

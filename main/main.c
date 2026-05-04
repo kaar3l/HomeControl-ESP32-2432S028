@@ -8,25 +8,30 @@
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "freertos/queue.h"
 #include "esp_log.h"
 #include "esp_system.h"
 #include "esp_netif.h"
 #include "esp_event.h"
 
-#define TAG              "main"
+#define TAG                  "main"
 #define HA_POLL_INTERVAL_MS  8000
 
-static app_settings_t s_settings;
-static bool           s_services_started;
+static app_settings_t  s_settings;
+static bool            s_services_started;
+
+/* 1-slot queue: LVGL task writes lock commands, main task executes them.
+ * Keeps all HTTP off the LVGL task so rendering never blocks on network I/O. */
+static QueueHandle_t   s_lock_cmd_queue;
 
 /* ------------------------------------------------------------------ */
-/* UI callbacks (called from LVGL task)                                */
+/* UI callbacks — called from LVGL task, must not do blocking I/O     */
 /* ------------------------------------------------------------------ */
 static void on_lock_action(bool lock)
 {
-    ESP_LOGI(TAG, "lock action: %s", lock ? "lock" : "unlock");
-    bool ok = lock ? ha_client_lock() : ha_client_unlock();
-    if (!ok) ui_show_feedback("Action failed — check HA connection");
+    ESP_LOGI(TAG, "lock action queued: %s", lock ? "lock" : "unlock");
+    ui_show_feedback(lock ? "Locking..." : "Unlocking...");
+    xQueueOverwrite(s_lock_cmd_queue, &lock);
 }
 
 static void on_vent_action(uint8_t speed)
@@ -80,8 +85,7 @@ static void on_wifi_state(wifi_state_t state)
 /* ------------------------------------------------------------------ */
 static void on_settings_saved(const app_settings_t *new_settings)
 {
-    /* Main body calls esp_restart(), so we never actually reach here,
-       but keep it for completeness. */
+    /* web_server calls esp_restart() before returning, so this is unreachable */
     (void)new_settings;
 }
 
@@ -90,7 +94,7 @@ static void on_settings_saved(const app_settings_t *new_settings)
 /* ------------------------------------------------------------------ */
 void app_main(void)
 {
-    /* 1. System init — must happen before any socket/netif use */
+    /* 1. System init */
     esp_netif_init();
     esp_event_loop_create_default();
 
@@ -100,25 +104,47 @@ void app_main(void)
     ESP_LOGI(TAG, "settings loaded, SSID='%s' HA='%s'",
              s_settings.wifi_ssid, s_settings.ha_url);
 
-    /* 2. Display + LVGL */
+    /* 3. Lock-action command queue (capacity 1 — latest command wins) */
+    s_lock_cmd_queue = xQueueCreate(1, sizeof(bool));
+
+    /* 4. Display + LVGL */
     display_init();
     ui_init(on_lock_action, on_vent_action);
 
-    /* Restore last known UI state */
     ui_set_vent_speed(s_settings.last_vent_speed);
     ui_set_lock_state(LOCK_STATE_UNKNOWN);
 
-    /* 3. Web server (settings + OTA) — always available */
+    /* 5. Web server (settings + OTA) — always available */
     web_server_start(&s_settings, on_settings_saved);
 
-    /* 4. WiFi (STA or AP fallback) */
+    /* 6. WiFi (STA or AP fallback) */
     wifi_manager_init(s_settings.wifi_ssid, s_settings.wifi_password, on_wifi_state);
 
-    /* 5. Main loop — poll HA lock state periodically */
+    /* 7. Main loop
+     *    - Blocks up to HA_POLL_INTERVAL_MS waiting for a lock command.
+     *    - If a command arrives it is executed immediately; state is then
+     *      refreshed with an extra poll so the UI updates without waiting
+     *      for the next regular cycle.
+     *    - After each command (or timeout) the regular poll fires. */
     while (1) {
+        bool do_lock;
+        bool got_cmd = (xQueueReceive(s_lock_cmd_queue, &do_lock,
+                                      pdMS_TO_TICKS(HA_POLL_INTERVAL_MS)) == pdTRUE);
+
+        if (got_cmd) {
+            if (wifi_manager_get_state() == WIFI_STATE_CONNECTED) {
+                bool ok = do_lock ? ha_client_lock() : ha_client_unlock();
+                if (!ok)
+                    ui_show_feedback("Action failed — check HA connection");
+                else
+                    ha_client_poll(); /* refresh state immediately after action */
+            } else {
+                ui_show_feedback("Not connected to Wi-Fi");
+            }
+        }
+
         if (wifi_manager_get_state() == WIFI_STATE_CONNECTED) {
             ha_client_poll();
         }
-        vTaskDelay(pdMS_TO_TICKS(HA_POLL_INTERVAL_MS));
     }
 }
