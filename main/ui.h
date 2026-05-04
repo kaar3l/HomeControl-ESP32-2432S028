@@ -13,3 +13,7 @@ void ui_set_mqtt_state(bool connected);
 void ui_set_lock_state(lock_state_t state);
 void ui_set_vent_speed(uint8_t speed);
 void ui_show_feedback(const char *msg);
+
+/* Calibration overlay: step 0 = tap point A, step 1 = tap point B */
+void ui_cal_show(int step);
+void ui_cal_hide(void);

@@ -1,8 +1,10 @@
 #include "ui.h"
+#include "display.h"
 #include "esp_lvgl_port.h"
 #include "lvgl.h"
 #include "esp_log.h"
 #include <stdbool.h>
+#include <stdio.h>
 
 #define TAG "ui"
 
@@ -38,6 +40,12 @@ static lv_timer_t *s_feedback_timer;
 
 static lock_state_t s_lock_state = LOCK_STATE_UNKNOWN;
 static uint8_t      s_vent_speed = 3;
+
+/* ---- Calibration overlay ---- */
+static lv_obj_t *s_cal_overlay;
+static lv_obj_t *s_cal_text;
+static lv_obj_t *s_cal_cross_h;
+static lv_obj_t *s_cal_cross_v;
 
 /* ------------------------------------------------------------------ */
 /* Helpers                                                             */
@@ -279,5 +287,71 @@ void ui_show_feedback(const char *msg)
     lv_label_set_text(s_feedback_label, msg);
     lv_timer_reset(s_feedback_timer);
     lv_timer_resume(s_feedback_timer);
+    lvgl_port_unlock();
+}
+
+/* ------------------------------------------------------------------ */
+/* Calibration overlay (lv_layer_top so it appears above everything)  */
+/* ------------------------------------------------------------------ */
+void ui_cal_show(int step)
+{
+    if (!lvgl_port_lock(100)) return;
+
+    if (!s_cal_overlay) {
+        s_cal_overlay = lv_obj_create(lv_layer_top());
+        lv_obj_set_size(s_cal_overlay, LCD_H_RES, LCD_V_RES);
+        lv_obj_set_pos(s_cal_overlay, 0, 0);
+        lv_obj_set_style_bg_color(s_cal_overlay, lv_color_hex(0x000000), 0);
+        lv_obj_set_style_bg_opa(s_cal_overlay, LV_OPA_COVER, 0);
+        lv_obj_set_style_border_width(s_cal_overlay, 0, 0);
+        lv_obj_set_style_radius(s_cal_overlay, 0, 0);
+        lv_obj_set_style_pad_all(s_cal_overlay, 0, 0);
+
+        s_cal_text = lv_label_create(s_cal_overlay);
+        lv_obj_set_style_text_color(s_cal_text, lv_color_hex(0xDEDEDE), 0);
+
+        /* Horizontal arm of the crosshair */
+        s_cal_cross_h = lv_obj_create(s_cal_overlay);
+        lv_obj_set_size(s_cal_cross_h, 30, 2);
+        lv_obj_set_style_bg_color(s_cal_cross_h, lv_color_hex(0xFF4444), 0);
+        lv_obj_set_style_bg_opa(s_cal_cross_h, LV_OPA_COVER, 0);
+        lv_obj_set_style_border_width(s_cal_cross_h, 0, 0);
+        lv_obj_set_style_radius(s_cal_cross_h, 0, 0);
+
+        /* Vertical arm of the crosshair */
+        s_cal_cross_v = lv_obj_create(s_cal_overlay);
+        lv_obj_set_size(s_cal_cross_v, 2, 30);
+        lv_obj_set_style_bg_color(s_cal_cross_v, lv_color_hex(0xFF4444), 0);
+        lv_obj_set_style_bg_opa(s_cal_cross_v, LV_OPA_COVER, 0);
+        lv_obj_set_style_border_width(s_cal_cross_v, 0, 0);
+        lv_obj_set_style_radius(s_cal_cross_v, 0, 0);
+    }
+
+    int px = g_touch_cal_scr_x[step];
+    int py = g_touch_cal_scr_y[step];
+
+    lv_obj_set_pos(s_cal_cross_h, px - 15, py - 1);
+    lv_obj_set_pos(s_cal_cross_v, px - 1,  py - 15);
+
+    char buf[48];
+    snprintf(buf, sizeof(buf), "Touch cross %d of %d", step + 1, TOUCH_CAL_COUNT);
+    lv_label_set_text(s_cal_text, buf);
+    lv_obj_align(s_cal_text, LV_ALIGN_CENTER, 0, 40);
+
+    lv_obj_clear_flag(s_cal_overlay, LV_OBJ_FLAG_HIDDEN);
+
+    lvgl_port_unlock();
+}
+
+void ui_cal_hide(void)
+{
+    if (!lvgl_port_lock(100)) return;
+    if (s_cal_overlay) {
+        lv_obj_delete(s_cal_overlay);
+        s_cal_overlay = NULL;
+        s_cal_text    = NULL;
+        s_cal_cross_h = NULL;
+        s_cal_cross_v = NULL;
+    }
     lvgl_port_unlock();
 }

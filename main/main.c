@@ -13,6 +13,7 @@
 #include "esp_system.h"
 #include "esp_netif.h"
 #include "esp_event.h"
+#include <string.h>
 
 #define TAG                  "main"
 #define HA_POLL_INTERVAL_MS  8000
@@ -56,11 +57,18 @@ static void on_lock_state(lock_state_t state)
 }
 
 /* ------------------------------------------------------------------ */
-/* MQTT state callback                                                 */
+/* MQTT callbacks                                                      */
 /* ------------------------------------------------------------------ */
 static void on_mqtt_state(bool connected)
 {
     ui_set_mqtt_state(connected);
+}
+
+static void on_mqtt_vent_speed(uint8_t speed)
+{
+    ESP_LOGI(TAG, "vent speed from MQTT: %u", speed);
+    s_settings.last_vent_speed = speed;
+    ui_set_vent_speed(speed);
 }
 
 /* ------------------------------------------------------------------ */
@@ -75,7 +83,7 @@ static void on_wifi_state(wifi_state_t state)
         ESP_LOGI(TAG, "WiFi up, starting MQTT and HA client");
         mqtt_manager_init(s_settings.mqtt_host, s_settings.mqtt_port,
                           s_settings.mqtt_user, s_settings.mqtt_pass,
-                          on_mqtt_state);
+                          on_mqtt_state, on_mqtt_vent_speed);
         ha_client_init(s_settings.ha_url, s_settings.ha_token, on_lock_state);
     }
 }
@@ -113,6 +121,41 @@ void app_main(void)
 
     ui_set_vent_speed(s_settings.last_vent_speed);
     ui_set_lock_state(LOCK_STATE_UNKNOWN);
+
+    /* 4.5 Touch calibration — run wizard on first boot or after web UI reset */
+    touch_cal_t cal;
+    if (s_settings.touch_calibrated) {
+        memcpy(cal.rx, s_settings.touch_cal_rx, sizeof(cal.rx));
+        memcpy(cal.ry, s_settings.touch_cal_ry, sizeof(cal.ry));
+        ESP_LOGI(TAG, "touch cal loaded from NVS");
+    } else {
+        ESP_LOGI(TAG, "starting 4-point touch calibration wizard");
+        bool ok = true;
+        for (int i = 0; i < TOUCH_CAL_COUNT && ok; i++) {
+            ui_cal_show(i);
+            if (display_touch_wait_tap(&cal.rx[i], &cal.ry[i], 30000)) {
+                ESP_LOGI(TAG, "cal[%d]: rx=%u ry=%u", i, cal.rx[i], cal.ry[i]);
+            } else {
+                ESP_LOGW(TAG, "cal point %d timed out, using defaults", i);
+                ok = false;
+            }
+        }
+        if (ok) {
+            memcpy(s_settings.touch_cal_rx, cal.rx, sizeof(cal.rx));
+            memcpy(s_settings.touch_cal_ry, cal.ry, sizeof(cal.ry));
+            s_settings.touch_calibrated = 1;
+            settings_save(&s_settings);
+            ESP_LOGI(TAG, "calibration saved");
+        } else {
+            /* Fall back to identity mapping */
+            for (int i = 0; i < TOUCH_CAL_COUNT; i++) {
+                cal.rx[i] = g_touch_cal_scr_x[i];
+                cal.ry[i] = g_touch_cal_scr_y[i];
+            }
+        }
+        ui_cal_hide();
+    }
+    display_add_touch_indev(&cal);
 
     /* 5. Web server (settings + OTA) — always available */
     web_server_start(&s_settings, on_settings_saved);

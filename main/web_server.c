@@ -50,6 +50,12 @@ static const char SETTINGS_HTML[] =
 "<button type='submit'>Upload Firmware</button>"
 "</form>"
 "<p class='note'>After uploading, the device will reboot into the new firmware.</p>"
+"<hr>"
+"<h2>Touch Calibration</h2>"
+"<form method='POST' action='/calibrate'>"
+"<p class='note'>Clears saved calibration. The device will restart and show the calibration wizard.</p>"
+"<button type='submit'>Recalibrate Touch</button>"
+"</form>"
 "</body></html>";
 
 static esp_err_t handle_root(httpd_req_t *req)
@@ -241,6 +247,26 @@ static esp_err_t handle_ota(httpd_req_t *req)
 }
 
 /* ------------------------------------------------------------------ */
+/* Calibration reset handler                                           */
+/* ------------------------------------------------------------------ */
+static esp_err_t handle_calibrate(httpd_req_t *req)
+{
+    s_settings->touch_calibrated = 0;
+    settings_save(s_settings);
+
+    httpd_resp_set_type(req, "text/html");
+    httpd_resp_sendstr(req,
+        "<!DOCTYPE html><html><body>"
+        "<h2>Calibration cleared. Rebooting...</h2>"
+        "<script>setTimeout(()=>location.href='/',8000)</script>"
+        "</body></html>");
+
+    vTaskDelay(pdMS_TO_TICKS(500));
+    esp_restart();
+    return ESP_OK;
+}
+
+/* ------------------------------------------------------------------ */
 /* Public API                                                          */
 /* ------------------------------------------------------------------ */
 void web_server_start(app_settings_t *settings, settings_saved_cb_t cb)
@@ -256,13 +282,15 @@ void web_server_start(app_settings_t *settings, settings_saved_cb_t cb)
         return;
     }
 
-    httpd_uri_t uri_root = { .uri = "/",      .method = HTTP_GET,  .handler = handle_root };
-    httpd_uri_t uri_save = { .uri = "/save",  .method = HTTP_POST, .handler = handle_save };
-    httpd_uri_t uri_ota  = { .uri = "/ota",   .method = HTTP_POST, .handler = handle_ota  };
+    httpd_uri_t uri_root = { .uri = "/",           .method = HTTP_GET,  .handler = handle_root      };
+    httpd_uri_t uri_save = { .uri = "/save",       .method = HTTP_POST, .handler = handle_save      };
+    httpd_uri_t uri_ota  = { .uri = "/ota",        .method = HTTP_POST, .handler = handle_ota       };
+    httpd_uri_t uri_cal  = { .uri = "/calibrate",  .method = HTTP_POST, .handler = handle_calibrate };
 
     httpd_register_uri_handler(s_server, &uri_root);
     httpd_register_uri_handler(s_server, &uri_save);
     httpd_register_uri_handler(s_server, &uri_ota);
+    httpd_register_uri_handler(s_server, &uri_cal);
 
     ESP_LOGI(TAG, "started on port %d", cfg.server_port);
 }
