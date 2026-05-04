@@ -1,0 +1,19 @@
+menu "Display Configuration"
+
+    choice DISPLAY_TYPE
+        prompt "Display controller"
+        default DISPLAY_TYPE_ILI9341
+        help
+            Select the TFT controller fitted on your board.
+            ESP32-2432S028  (v1 / v2) : ILI9341
+            ESP32-2432S028S (v3 / S)  : ST7789
+
+        config DISPLAY_TYPE_ILI9341
+            bool "ILI9341  (2432S028 v1/v2)"
+
+        config DISPLAY_TYPE_ST7789
+            bool "ST7789   (2432S028S / v3)"
+
+    endchoice
+
+endmenu
